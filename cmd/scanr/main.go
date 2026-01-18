@@ -34,7 +34,7 @@ func main() {
 	// Validate format
 	format := strings.ToLower(*formatFlag)
 	if format != "text" && format != "json" {
-		fmt.Fprintf(os.Stderr, "Error: format must be 'text' or 'json', got %q\n", *&formatFlag)
+		fmt.Fprintf(os.Stderr, "Error: format must be 'text' or 'json', got %q\n", *formatFlag)
 		os.Exit(2)
 	}
 
