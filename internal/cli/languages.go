@@ -84,7 +84,7 @@ func parseLanguageFlag(input string) ([]string, error) {
 		}
 	}
 
-	languages = duplicate(languages)
+	languages = deduplicate(languages)
 
 	if len(languages) == 0 {
 		return nil, fmt.Errorf("No valid languages selected")
@@ -115,10 +115,10 @@ func promptForLanguage() ([]string, error) {
 }
 
 /**
-* Removes duplicate strings from slice
+* Removes deduplicate strings from slice
  */
 
-func duplicate(slice []string) []string {
+func deduplicate(slice []string) []string {
 	seen := make(map[string]bool)
 	result := []string{}
 
