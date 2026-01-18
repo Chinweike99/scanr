@@ -8,36 +8,31 @@ import (
 	"strings"
 )
 
-
-
-var SupportedLanguages = map[string][]string {
-	"go":			{".go"},
-	"java":			{".java"},
-	"typescript":	{".ts", ".tsx"},
-	"javascript":	{".js", ".jsx"},
-	"python":		{".py"},
-	"csharp":		{".cs"},
-	"dotnet":		{".cs", ".vb", ".fs"},
+var SupportedLanguages = map[string][]string{
+	"go":         {".go"},
+	"java":       {".java"},
+	"typescript": {".ts", ".tsx"},
+	"javascript": {".js", ".jsx"},
+	"python":     {".py"},
+	"csharp":     {".cs"},
+	"dotnet":     {".cs", ".vb", ".fs"},
 }
-
 
 type LanguageDisplay struct {
-	ID		int
-	Name	string
-	key		string
+	ID   int
+	Name string
+	key  string
 }
 
-
-var LanguageList = []LanguageDisplay {
+var LanguageList = []LanguageDisplay{
 	{1, "Go", "go"},
-    {2, "Java", "java"},
-    {3, "TypeScript", "typescript"},
-    {4, "JavaScript", "javascript"},
-    {5, "Python", "python"},
-    {6, "C#", "csharp"},
-    {7, ".NET", "dotnet"},
+	{2, "Java", "java"},
+	{3, "TypeScript", "typescript"},
+	{4, "JavaScript", "javascript"},
+	{5, "Python", "python"},
+	{6, "C#", "csharp"},
+	{7, ".NET", "dotnet"},
 }
-
 
 // ParseLanguages processes the --lang flag or prompts interactively
 func ParseLanguages(langInput string) ([]string, error) {
@@ -52,7 +47,7 @@ func ParseLanguages(langInput string) ([]string, error) {
 }
 
 // ParseLanguageFlag parses comma-separated language names or keys
-func parseLanguageFlag(input string) ([]string, error){
+func parseLanguageFlag(input string) ([]string, error) {
 	parts := strings.Split(strings.ToLower(input), ",")
 	var languages []string
 
@@ -84,7 +79,7 @@ func parseLanguageFlag(input string) ([]string, error){
 			if !found {
 				return nil, fmt.Errorf("Unsupported Language: %s", part)
 			}
-		}else{
+		} else {
 			languages = append(languages, part)
 		}
 	}
@@ -97,11 +92,10 @@ func parseLanguageFlag(input string) ([]string, error){
 	return languages, nil
 }
 
-
 /**
 * Display interactive language selection
-*/
-func promptForLanguage() ([]string, error){
+ */
+func promptForLanguage() ([]string, error) {
 	fmt.Println("Select languages to review (comma-separated): ")
 	for _, lang := range LanguageList {
 		fmt.Printf("[%d] %s\n", lang.ID, lang.Name)
@@ -120,33 +114,31 @@ func promptForLanguage() ([]string, error){
 	return parseLanguageFlag(input)
 }
 
-
 /**
 * Removes duplicate strings from slice
-*/
+ */
 
 func duplicate(slice []string) []string {
 	seen := make(map[string]bool)
 	result := []string{}
 
 	for _, item := range slice {
-		if !seen[item]{
+		if !seen[item] {
 			seen[item] = true
 			result = append(result, item)
 		}
 	}
-	return  result
+	return result
 }
-
 
 /**
 *  Getlanguages by Number
-*/
+ */
 func getLanguageByNumber(num int) (string, error) {
 	for _, lang := range LanguageList {
 		if lang.ID == num {
-			return  lang.key, nil
+			return lang.key, nil
 		}
 	}
-	return  "", fmt.Errorf("language number %d not found", num)
+	return "", fmt.Errorf("language number %d not found", num)
 }

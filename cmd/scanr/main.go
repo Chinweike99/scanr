@@ -14,12 +14,12 @@ func main() {
 	ctx := context.Background()
 
 	// Define CLI flag
-	langFlag := flag.String("lang", "",  "Comma-separated language names to review (go,java,typescript,etc)")
+	langFlag := flag.String("lang", "", "Comma-separated language names to review (go,java,typescript,etc)")
 	stagedFlag := flag.Bool("staged", true, "Review only staged changes")
 	maxFilesFlag := flag.Int("max-files", 100, "Maximum number of files to review")
 	formatFlag := flag.String("format", "text", "Output format: text or json")
 
-	flag.Usage = func ()  {
+	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags]\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
 		flag.PrintDefaults()
@@ -46,10 +46,10 @@ func main() {
 
 	// Create config
 	cfg := &config.Config{
-		Languages: *langFlag,
+		Languages:  *langFlag,
 		StagedOnly: *stagedFlag,
-		MaxFiles: *maxFilesFlag,
-		Format: format,
+		MaxFiles:   *maxFilesFlag,
+		Format:     format,
 	}
 
 	// Run the code review command
