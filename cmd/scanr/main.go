@@ -8,8 +8,6 @@ import (
 	"scanr/internal/cli"
 	"scanr/internal/config"
 	"strings"
-
-	"golang.org/x/tools/go/cfg"
 )
 
 func main() {
@@ -36,7 +34,7 @@ func main() {
 	// Validate format
 	format := strings.ToLower(*formatFlag)
 	if format != "text" && format != "json" {
-		fmt.Fprint(os.Stderr, "Error: format must be 'text' or 'json', got %q\n", *maxFilesFlag)
+		fmt.Fprintf(os.Stderr, "Error: format must be 'text' or 'json', got %q\n", *&formatFlag)
 		os.Exit(2)
 	}
 
