@@ -75,7 +75,6 @@ func NewScanner(cfg Config) (*Scanner, error) {
 		cfg.RootDir = cwd
 	}
 
-	// Normalize root directory path
 	rootDir, err := filepath.Abs(cfg.RootDir)
 	if err != nil {
 		return nil, fmt.Errorf("invalid root directory: %v", err)
@@ -91,7 +90,6 @@ func NewScanner(cfg Config) (*Scanner, error) {
 		return nil, err
 	}
 
-	// Set Defaults
 	if cfg.MaxFileSize <= 0 {
 		cfg.MaxFileSize = DefaultMaxFileSize
 	}
@@ -100,7 +98,7 @@ func NewScanner(cfg Config) (*Scanner, error) {
 		cfg.MaxLines = DefaultMaxLines
 	}
 
-	// Build ignore directores map
+
 	igonoreDir := make(map[string]bool)
 	for _, dir := range DefaultIgnoreDirs {
 		igonoreDir[dir] = true
@@ -161,7 +159,6 @@ func (s *Scanner) Scan(ctx context.Context, maxFiles int) ([]FileInfo, error) {
 	var mu sync.Mutex
 	var scanErr error
 
-	// Create a semaphore to limit concurrent file scanning
 	sem := make(chan struct{}, 10)
 
 	err = filepath.WalkDir(s.rootDir, func(path string, d fs.DirEntry, err error) error {
@@ -204,7 +201,6 @@ func (s *Scanner) Scan(ctx context.Context, maxFiles int) ([]FileInfo, error) {
 		// Get file info and check size
 		info, err := d.Info()
 		if err != nil {
-			// Skip files we can't stat
 			return nil
 		}
 
@@ -283,7 +279,7 @@ func (s *Scanner) loadGitIgnorePatterns() ([]string, error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			break // Reached roor
+			break
 		}
 		dir = parent
 	}
