@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"scanr/internal/fs"
 	"strings"
 )
 
@@ -18,6 +19,7 @@ type ReviewOptions struct {
 	MaxFiles    int
 	Format      string
 	Interactive bool
+	Files       []fs.FileInfo
 }
 
 // ValidateConfig validates the configuration values

@@ -98,7 +98,6 @@ func NewScanner(cfg Config) (*Scanner, error) {
 		cfg.MaxLines = DefaultMaxLines
 	}
 
-
 	igonoreDir := make(map[string]bool)
 	for _, dir := range DefaultIgnoreDirs {
 		igonoreDir[dir] = true
@@ -149,6 +148,11 @@ var SupportedExtensions = map[string][]string{
 
 // Scan scans the filesystem for reviewable files
 func (s *Scanner) Scan(ctx context.Context, maxFiles int) ([]FileInfo, error) {
+	// Clear scanned directories map for a fresh scan
+	s.mu.Lock()
+	s.scannedDir = make(map[string]bool)
+	s.mu.Unlock()
+
 	// Load .gitignore patterns
 	gitignorePatterns, err := s.loadGitIgnorePatterns()
 	if err != nil {
@@ -274,7 +278,9 @@ func (s *Scanner) loadGitIgnorePatterns() ([]string, error) {
 	dir := s.rootDir
 	for {
 		gitignorePath := filepath.Join(dir, ".gitignore")
-		if _, err := s.parseGitIgnoreFile(gitignorePath, patterns); err != nil && !os.IsNotExist(err) {
+		if newPatterns, err := s.parseGitIgnoreFile(gitignorePath, patterns); err == nil {
+			patterns = newPatterns
+		} else if !os.IsNotExist(err) {
 			return nil, err
 		}
 		parent := filepath.Dir(dir)
@@ -285,7 +291,14 @@ func (s *Scanner) loadGitIgnorePatterns() ([]string, error) {
 	}
 	// Add patterns from root .gitignore
 	roorGitignore := filepath.Join(s.rootDir, ".gitignore")
-	return s.parseGitIgnoreFile(roorGitignore, patterns)
+	newPatterns, err := s.parseGitIgnoreFile(roorGitignore, patterns)
+	if err == nil {
+		return newPatterns, nil
+	}
+	if os.IsNotExist(err) {
+		return patterns, nil
+	}
+	return nil, err
 }
 
 // parseGitignoreFile parses a .gitignore file
@@ -351,7 +364,7 @@ func (s *Scanner) countLines(path string) (int, error) {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		count++
-		if count > s.maxLines {
+		if s.maxLines > 0 && count >= s.maxLines {
 			break
 		}
 	}
@@ -397,12 +410,61 @@ func (s *Scanner) shouldIgnore(path string, patterns []string) bool {
 		return true // Can't get relative path, skip it
 	}
 
+	// Normalize path separators for consistent matching
+	relPath = filepath.ToSlash(relPath)
+
 	// Check against .gitignore patterns
 	for _, pattern := range patterns {
 		if pattern == "" {
 			continue
 		}
 
+		// Handle directory patterns (ending with /)
+		if strings.HasSuffix(pattern, "/") {
+			dirPattern := strings.TrimSuffix(pattern, "/")
+			if strings.HasPrefix(relPath, dirPattern+"/") || relPath == dirPattern {
+				return true
+			}
+		}
+
+		// Handle patterns with /* (e.g., node_modules/*)
+		if strings.HasSuffix(pattern, "/*") {
+			dirPattern := strings.TrimSuffix(pattern, "/*")
+			if strings.HasPrefix(relPath, dirPattern+"/") {
+				return true
+			}
+		}
+
+		// Handle **/ prefix patterns
+		if strings.HasPrefix(pattern, "**/") {
+			suffix := strings.TrimPrefix(pattern, "**/")
+			
+			// For patterns like **/temp/*, we want to match paths where temp
+			// appears as a directory component, but not necessarily at the root
+			if strings.HasSuffix(suffix, "/*") {
+				dirName := strings.TrimSuffix(suffix, "/*")
+				// Split path and check if dirName appears as a directory in the path
+				// (but not as the first component for **/ patterns)
+				parts := strings.Split(relPath, "/")
+				for i := 1; i < len(parts)-1; i++ {
+					if parts[i] == dirName {
+						return true
+					}
+				}
+			} else {
+				// Match if any path component matches the suffix
+				parts := strings.Split(relPath, "/")
+				for i := range parts {
+					subPath := strings.Join(parts[i:], "/")
+					if matched, _ := filepath.Match(suffix, subPath); matched {
+						return true
+					}
+				}
+			}
+			continue
+		}
+
+		// Standard glob matching
 		matched, err := filepath.Match(pattern, relPath)
 		if err == nil && matched {
 			return true
