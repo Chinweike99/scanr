@@ -438,7 +438,7 @@ func (s *Scanner) shouldIgnore(path string, patterns []string) bool {
 		// Handle **/ prefix patterns
 		if strings.HasPrefix(pattern, "**/") {
 			suffix := strings.TrimPrefix(pattern, "**/")
-			
+
 			// For patterns like **/temp/*, we want to match paths where temp
 			// appears as a directory component, but not necessarily at the root
 			if strings.HasSuffix(suffix, "/*") {
