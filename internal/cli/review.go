@@ -129,7 +129,6 @@ func scanAllFiles(ctx context.Context, cwd string, languages []string, cfg *conf
 	fmt.Printf("  Files: %v\n", opts.Files)
 	fmt.Printf("  Interactive: %v\n", opts.Repository)
 
-
     displayFoundFiles(files, cfg.Format)
     
     return 0, nil
