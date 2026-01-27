@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"scanr/internal/fs"
+	"scanr/internal/git"
 	"strings"
 )
 
@@ -20,6 +21,7 @@ type ReviewOptions struct {
 	Format      string
 	Interactive bool
 	Files       []fs.FileInfo
+	Repository  *git.Repository
 }
 
 // ValidateConfig validates the configuration values
