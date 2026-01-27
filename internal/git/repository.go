@@ -12,7 +12,7 @@ import (
 
 var (
 	ErrorNotARepository = errors.New("not a git repository")
-	ErrorGitNotFound = errors.New("git command not found")
+	ErrorGitNotFound    = errors.New("git command not found")
 )
 
 func DetectRepository(startPath string) (*Repository, error) {
@@ -29,7 +29,7 @@ func DetectRepository(startPath string) (*Repository, error) {
 	for {
 		gitDir := filepath.Join(current, ".git")
 
-		if fi, err := os.Stat(gitDir); err == nil && fi.IsDir(){
+		if fi, err := os.Stat(gitDir); err == nil && fi.IsDir() {
 			return createRepository(current, gitDir)
 		}
 
@@ -47,7 +47,6 @@ func DetectRepository(startPath string) (*Repository, error) {
 	return nil, ErrorNotARepository
 }
 
-
 // Checks if a directory is a bare git repository
 func isBareRepository(path string) bool {
 	checkFiles := []string{"HEAD", "config", "objects", "refs"}
@@ -56,11 +55,10 @@ func isBareRepository(path string) bool {
 			return false
 		}
 	}
-	return  true
+	return true
 }
 
-
-func createRepository(path, gitDir string) (*Repository, error){
+func createRepository(path, gitDir string) (*Repository, error) {
 	isBare := path == gitDir
 
 	isShallow := false
@@ -69,21 +67,19 @@ func createRepository(path, gitDir string) (*Repository, error){
 		isShallow = true
 	}
 
-	return  &Repository{
+	return &Repository{
 		Path:      path,
-        WorkTree:  path,
-        GitDir:    gitDir,
-        IsBare:    isBare,
-        IsShallow: isShallow,
+		WorkTree:  path,
+		GitDir:    gitDir,
+		IsBare:    isBare,
+		IsShallow: isShallow,
 	}, nil
 }
-
 
 func IsRepository(path string) bool {
 	repo, err := DetectRepository(path)
 	return err == nil && repo != nil
 }
-
 
 func GetRepositoryRoot(startPath string) (string, error) {
 	repo, err := DetectRepository(startPath)
@@ -92,4 +88,3 @@ func GetRepositoryRoot(startPath string) (string, error) {
 	}
 	return repo.Path, nil
 }
-

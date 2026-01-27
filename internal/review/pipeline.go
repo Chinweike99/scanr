@@ -125,7 +125,7 @@ func (p *pipeline) Run(ctx context.Context, files []*fs.FileInfo) (*ReviewResult
 
 	// Wait for all tasks to complete before collecting results
 	p.workerPool.Stop()
-	
+
 	// Close the result channel so collectResults can finish reading
 	close(resultChan)
 	wg.Wait()
