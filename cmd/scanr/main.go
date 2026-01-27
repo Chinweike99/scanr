@@ -31,25 +31,18 @@ func main() {
 
 	flag.Parse()
 
-	// Validate format
-	format := strings.ToLower(*formatFlag)
-	if format != "text" && format != "json" {
-		fmt.Fprintf(os.Stderr, "Error: format must be 'text' or 'json', got %q\n", *formatFlag)
-		os.Exit(2)
-	}
-
-	// Validate max files
-	if *maxFilesFlag <= 0 {
-		fmt.Fprintf(os.Stderr, "Error: max-files must be positive, got %d\n", *maxFilesFlag)
-		os.Exit(2)
-	}
-
 	// Create config
 	cfg := &config.Config{
 		Languages:  *langFlag,
 		StagedOnly: *stagedFlag,
 		MaxFiles:   *maxFilesFlag,
-		Format:     format,
+		Format:     strings.ToLower(*formatFlag),
+	}
+
+	// Validate config
+	if err := config.ValidateConfig(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(2)
 	}
 
 	// Run the code review command
