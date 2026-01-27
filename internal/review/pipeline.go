@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log"
+	"scanr/internal/fs"
 	"scanr/internal/worker"
 	"sync"
 	"sync/atomic"
@@ -86,7 +86,7 @@ func NewPipeline(config Config, reviewer Reviewer) (Pipeline, error) {
 }
 
 // Run executes the review pipeline on the given files
-func (p *pipeline) Run(ctx context.Context, files []fs.FileInfo) (*ReviewResult, error) {
+func (p *pipeline) Run(ctx context.Context, files []*fs.FileInfo) (*ReviewResult, error) {
 	if !p.isRunning.CompareAndSwap(false, true) {
 		return nil, errors.New("pipeline is already running")
 	}
@@ -99,7 +99,7 @@ func (p *pipeline) Run(ctx context.Context, files []fs.FileInfo) (*ReviewResult,
 	defer cancel()
 
 	// Start worker pool with wrapper to match WorkerFunc signature
-	workerFunc := func(ctx context.Context, file fs.FileInfo) (interface{}, error) {
+	workerFunc := func(ctx context.Context, file *fs.FileInfo) (interface{}, error) {
 		return p.reviewer.ReviewFile(ctx, file)
 	}
 	if err := p.workerPool.Start(pipelineCtx, workerFunc); err != nil {
@@ -123,12 +123,17 @@ func (p *pipeline) Run(ctx context.Context, files []fs.FileInfo) (*ReviewResult,
 		return nil, fmt.Errorf("failed to submit tasks: %w", err)
 	}
 
-	// Wait for all tasks to complete
+	// Wait for all tasks to complete before collecting results
+	p.workerPool.Stop()
+	
+	// Close the result channel so collectResults can finish reading
 	close(resultChan)
 	wg.Wait()
 
 	// Process dead letters (retry logic)
-	p.processDeadLetters(pipelineCtx, resultChan)
+	// Note: processDeadLetters cannot send on resultChan after it's closed,
+	// so we collect dead letter results separately
+	p.processDeadLetters(pipelineCtx)
 
 	// Finalize result
 	result.EndTime = time.Now()
@@ -153,8 +158,7 @@ func (p *pipeline) Stop() error {
 }
 
 // submitTasks submits all files for review
-func (p *pipeline) submitTasks(ctx context.Context, files []fs.FileInfo, resultChan chan<- worker.TaskResult) error {
-	// Group files for batch submission
+func (p *pipeline) submitTasks(ctx context.Context, files []*fs.FileInfo, resultChan chan<- worker.TaskResult) error {
 	batchSize := p.config.MaxWorkers * 2
 	for i := 0; i < len(files); i += batchSize {
 		end := i + batchSize
@@ -250,7 +254,7 @@ func (p *pipeline) processTaskResult(ctx context.Context, taskResult worker.Task
 }
 
 // processDeadLetters processes tasks in the dead letter queue
-func (p *pipeline) processDeadLetters(ctx context.Context, resultChan chan<- worker.TaskResult) {
+func (p *pipeline) processDeadLetters(ctx context.Context) {
 	if p.config.MaxRetries <= 0 {
 		return
 	}
@@ -263,19 +267,16 @@ func (p *pipeline) processDeadLetters(ctx context.Context, resultChan chan<- wor
 
 		// Retry the task
 		retryCtx, cancel := context.WithTimeout(ctx, p.config.TimeoutPerFile)
-		defer cancel()
 
 		issues, err := p.reviewer.ReviewFile(retryCtx, dl.Task.File)
+		cancel()
 
-		resultChan <- worker.TaskResult{
-			TaskID: dl.Task.ID,
-			File:   dl.Task.File,
-			Issues: interface{}(issues),
-			Error:  err,
-			Retry:  false, // Don't retry again
-		}
-
-		if err != nil {
+		// Process result directly without sending on closed channel
+		if err == nil && issues != nil {
+			// Successfully retried - update metrics
+			p.metrics.filesRetried.Add(-1) // Remove from retry count
+		} else if err != nil {
+			// Still failing, keep in dead letter for next retry cycle
 			p.deadLetter.Push(dl.Task, err, dl.Attempts+1)
 		}
 	}

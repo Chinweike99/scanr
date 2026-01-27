@@ -58,7 +58,7 @@ func repeatLines(line string, n int) string {
 // CreateTempTestDir creates a temporary directory for testing
 func CreateTempTestDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("", "preflight-test-*")
+	dir, err := os.MkdirTemp("", "scanr-test-*")
 	if err != nil {
 		t.Fatal(err)
 	}

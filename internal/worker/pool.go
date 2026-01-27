@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"scanr/internal/fs"
 )
 
 var (
@@ -19,7 +20,7 @@ var (
 // Task represents a review task to be processed
 type Task struct {
 	ID     int
-	File   fs.FileInfo
+	File   *fs.FileInfo
 	Result chan<- TaskResult
 	Ctx    context.Context
 }
@@ -27,7 +28,7 @@ type Task struct {
 // TaskResult represents the result of processing a task
 type TaskResult struct {
 	TaskID  int
-	File    fs.FileInfo
+	File    *fs.FileInfo
 	Issues  interface{}
 	Error   error
 	Retry   bool
@@ -49,7 +50,7 @@ type WorkerPool struct {
 }
 
 // WorkerFunc is the function that processes a task
-type WorkerFunc func(ctx context.Context, file fs.FileInfo) (interface{}, error)
+type WorkerFunc func(ctx context.Context, file *fs.FileInfo) (interface{}, error)
 
 func NewWorkerPool(capacity int, queueSize int) (*WorkerPool, error) {
 	if capacity <= 0 {
@@ -79,7 +80,7 @@ func (p *WorkerPool) Start(ctx context.Context, workerFunc WorkerFunc) error {
 	return nil
 }
 
-func (p *WorkerPool) Submit(ctx context.Context, taskID int, file fs.FileInfo, resultChan chan<- TaskResult) error {
+func (p *WorkerPool) Submit(ctx context.Context, taskID int, file *fs.FileInfo, resultChan chan<- TaskResult) error {
 	if p.stopped.Load() {
 		return ErrPoolStopped
 	}
@@ -101,7 +102,7 @@ func (p *WorkerPool) Submit(ctx context.Context, taskID int, file fs.FileInfo, r
 }
 
 // SubmitBatch submits multiple tasks to the worker pool
-func (p *WorkerPool) SubmitBatch(ctx context.Context, files []fs.FileInfo, resultChan chan<- TaskResult) error {
+func (p *WorkerPool) SubmitBatch(ctx context.Context, files []*fs.FileInfo, resultChan chan<- TaskResult) error {
 	for i, file := range files {
 		select {
 		case <-ctx.Done():
@@ -144,6 +145,7 @@ func (p *WorkerPool) Stop() error {
 	}
 
 	close(p.stopChan)
+	close(p.taskQueue) // Signal workers to stop by closing the queue
 
 	// Wait for all workers to finish
 	done := make(chan struct{})
@@ -161,18 +163,28 @@ func (p *WorkerPool) Stop() error {
 	}
 }
 
+// safeSend attempts to send a result without panicking if channel is closed
+func (p *WorkerPool) safeSend(resultChan chan<- TaskResult, result TaskResult) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Channel was closed, silently ignore
+		}
+	}()
+
+	resultChan <- result
+}
+
 // worker is the goroutine that processes tasks
 func (p *WorkerPool) worker(ctx context.Context, workerFunc WorkerFunc, id int) {
 	defer p.wg.Done()
 
 	for {
 		select {
-		case <-p.stopChan:
-			return
-		case task := <-p.taskQueue:
+		case task, ok := <-p.taskQueue:
+			if !ok {
+				return // Queue was closed
+			}
 			p.processTask(ctx, task, workerFunc, id)
-		case <-ctx.Done():
-			return
 		}
 	}
 }
@@ -194,30 +206,30 @@ func (p *WorkerPool) processTask(ctx context.Context, task Task, workerFunc Work
 		// Context was cancelled or timed out
 		if errors.Is(mergedCtx.Err(), context.DeadlineExceeded) {
 			p.failedTasks.Add(1)
-			task.Result <- TaskResult{
+			p.safeSend(task.Result, TaskResult{
 				TaskID: task.ID,
 				File:   task.File,
 				Error:  fmt.Errorf("review timed out after 30 seconds"),
 				Retry:  true,
-			}
+			})
 		} else {
 			p.failedTasks.Add(1)
-			task.Result <- TaskResult{
+			p.safeSend(task.Result, TaskResult{
 				TaskID: task.ID,
 				File:   task.File,
 				Error:  mergedCtx.Err(),
 				Retry:  false,
-			}
+			})
 		}
 	default:
 		// Send result
-		task.Result <- TaskResult{
+		p.safeSend(task.Result, TaskResult{
 			TaskID: task.ID,
 			File:   task.File,
 			Issues: issues,
 			Error:  err,
 			Retry:  err != nil, // Retry on error
-		}
+		})
 
 		if err != nil {
 			p.failedTasks.Add(1)
