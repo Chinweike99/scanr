@@ -8,11 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"scanr/internal/config"
 	"scanr/internal/fs"
 	"scanr/internal/git"
+	"scanr/internal/output"
 	"scanr/internal/review"
 	"scanr/pkg/reviewer"
 )
@@ -32,7 +32,7 @@ func RunReview(ctx context.Context, cfg *config.Config) (int, error) {
 	}
 
 	// Get files to review
-	files, err := getFilesToReview(ctx, cwd, languages, cfg)
+	files, _, err := getFilesToReview(ctx, cwd, languages, cfg)
 	if err != nil {
 		return 2, fmt.Errorf("failed to get files: %v", err)
 	}
@@ -43,12 +43,6 @@ func RunReview(ctx context.Context, cfg *config.Config) (int, error) {
 	}
 
 	log.Printf("Found %d file(s) to review", len(files))
-
-	// Convert to pointer slice
-	filePointers := make([]*fs.FileInfo, len(files))
-	for i := range files {
-		filePointers[i] = &files[i]
-	}
 
 	// Create mock reviewer for now
 	mockReviewer := reviewer.NewMockReviewer("scanr-mock")
@@ -61,28 +55,41 @@ func RunReview(ctx context.Context, cfg *config.Config) (int, error) {
 	defer pipeline.Stop()
 
 	// Run review
+	filePointers := make([]*fs.FileInfo, len(files))
+	for i := range files {
+		filePointers[i] = &files[i]
+	}
 	result, err := pipeline.Run(ctx, filePointers)
 	if err != nil {
 		return 2, fmt.Errorf("review failed: %v", err)
 	}
 
-	// Display results
-	displayReviewResults(result, cfg.Format)
+	// Create output formatter
+	factory := output.NewFormatterFactory()
+	formatter, err := factory.CreateFormatterFromFlags(cfg.Format, true)
+	if err != nil {
+		return 2, fmt.Errorf("failed to create formatter: %w", err)
+	}
+
+	// Format and display results
+	if err := formatter.Format(result, os.Stdout); err != nil {
+		return 2, fmt.Errorf("failed to format output: %w", err)
+	}
 
 	// Determine exit code
-	exitCode := determineExitCode(result)
+	exitCode := output.DetermineExitCode(result)
 
 	return exitCode, nil
 }
 
 // getFilesToReview gets files to review based on git status or full scan
-func getFilesToReview(ctx context.Context, cwd string, languages []string, cfg *config.Config) ([]fs.FileInfo, error) {
+func getFilesToReview(ctx context.Context, cwd string, languages []string, cfg *config.Config) ([]fs.FileInfo, *git.Repository, error) {
 	// Detect git repository
 	repo, err := git.DetectRepository(cwd)
 	if err != nil {
 		log.Printf("Warning: Not a git repository (%v), scanning all files", err)
 		files, err := scanAllFiles(ctx, cwd, languages, cfg.MaxFiles)
-		return files, err
+		return files, nil, err
 	}
 
 	log.Printf("Found git repository at: %s", repo.Path)
@@ -92,13 +99,13 @@ func getFilesToReview(ctx context.Context, cwd string, languages []string, cfg *
 	if cfg.StagedOnly {
 		changes, err = repo.GetStagedChanges(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get staged changes: %v", err)
+			return nil, repo, fmt.Errorf("failed to get staged changes: %v", err)
 		}
 		log.Printf("Found %d staged file(s)", len(changes))
 	} else {
 		changes, err = repo.GetAllChanges(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get changes: %v", err)
+			return nil, repo, fmt.Errorf("failed to get changes: %v", err)
 		}
 		log.Printf("Found %d changed file(s)", len(changes))
 	}
@@ -106,10 +113,10 @@ func getFilesToReview(ctx context.Context, cwd string, languages []string, cfg *
 	// Filter changes by language
 	files, err := filterAndConvertChanges(repo, changes, languages, cfg.MaxFiles)
 	if err != nil {
-		return nil, fmt.Errorf("failed to process changes: %v", err)
+		return nil, repo, fmt.Errorf("failed to process changes: %v", err)
 	}
 
-	return files, nil
+	return files, repo, nil
 }
 
 // scanAllFiles handles non-git repository scanning
@@ -204,10 +211,11 @@ func filterAndConvertChanges(repo *git.Repository, changes []git.FileChange, lan
 		}
 
 		files = append(files, fs.FileInfo{
-			Path:     fullPath,
-			Size:     info.Size(),
-			Lines:    lines,
-			Relative: change.Path,
+			Path:      fullPath,
+			Size:      info.Size(),
+			Lines:     lines,
+			Languages: language,
+			Relative:  change.Path,
 		})
 
 		fileCount++
@@ -237,96 +245,4 @@ func countFileLines(path string) (int, error) {
 	}
 
 	return count, scanner.Err()
-}
-
-// displayReviewResults displays the review results
-func displayReviewResults(result *review.ReviewResult, format string) {
-	if format == "json" {
-		displayJSONResults(result)
-	} else {
-		displayTextResults(result)
-	}
-}
-
-// displayJSONResults displays results in JSON format
-func displayJSONResults(result *review.ReviewResult) {
-	// Simple JSON output for now
-	// In Phase 5, we'll implement proper JSON marshaling
-	fmt.Printf("{\n")
-	fmt.Printf("  \"total_files\": %d,\n", result.TotalFiles)
-	fmt.Printf("  \"reviewed_files\": %d,\n", result.ReviewedFiles)
-	fmt.Printf("  \"total_issues\": %d,\n", result.TotalIssues)
-	fmt.Printf("  \"critical_count\": %d,\n", result.CriticalCount)
-	fmt.Printf("  \"warning_count\": %d,\n", result.WarningCount)
-	fmt.Printf("  \"info_count\": %d,\n", result.InfoCount)
-	fmt.Printf("  \"duration_ms\": %.0f\n", result.Duration.Seconds()*1000)
-	fmt.Printf("}\n")
-}
-
-// displayTextResults displays results in text format
-func displayTextResults(result *review.ReviewResult) {
-	fmt.Println("\n" + strings.Repeat("=", 60))
-	fmt.Println("scanr REVIEW RESULTS")
-	fmt.Println(strings.Repeat("=", 60))
-
-	fmt.Printf("\nSummary:\n")
-	fmt.Printf("  Files reviewed: %d/%d\n", result.ReviewedFiles, result.TotalFiles)
-	fmt.Printf("  Total issues: %d\n", result.TotalIssues)
-	fmt.Printf("  Critical: %d\n", result.CriticalCount)
-	fmt.Printf("  Warnings: %d\n", result.WarningCount)
-	fmt.Printf("  Info: %d\n", result.InfoCount)
-	fmt.Printf("  Duration: %v\n", result.Duration.Round(time.Millisecond))
-
-	if result.TotalIssues > 0 {
-		fmt.Println("\nIssues by file:")
-		for _, fileReview := range result.FileReviews {
-			if len(fileReview.Issues) > 0 {
-				fmt.Printf("\n%s:\n", fileReview.File.Relative)
-				for _, issue := range fileReview.Issues {
-					severityColor := getSeverityColor(issue.Severity)
-					fmt.Printf("  [%s] %s", severityColor, issue.Title)
-					if issue.Line > 0 {
-						fmt.Printf(" (line %d)", issue.Line)
-					}
-					fmt.Println()
-					fmt.Printf("      %s\n", issue.Description)
-					if len(issue.Suggestions) > 0 {
-						fmt.Printf("      Suggestions:\n")
-						for _, suggestion := range issue.Suggestions {
-							fmt.Printf("      - %s\n", suggestion)
-						}
-					}
-				}
-			}
-		}
-	} else {
-		fmt.Println("\n✅ No issues found!")
-	}
-
-	fmt.Println(strings.Repeat("=", 60))
-}
-
-// getSeverityColor returns a colored string for severity
-func getSeverityColor(severity review.Severity) string {
-	switch severity {
-	case review.SeverityCritical:
-		return "🔴 CRITICAL"
-	case review.SeverityHigh:
-		return "🟡 WARNING"
-	case review.SeverityInfo:
-		return "🔵 INFO"
-	default:
-		return string(severity)
-	}
-}
-
-// determineExitCode determines the exit code based on review results
-func determineExitCode(result *review.ReviewResult) int {
-	if result.CriticalCount > 0 {
-		return 2
-	}
-	if result.WarningCount > 0 {
-		return 1
-	}
-	return 0
 }
