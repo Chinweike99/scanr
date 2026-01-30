@@ -45,10 +45,16 @@ func RunReview(ctx context.Context, cfg *config.Config) (int, error) {
 	log.Printf("Found %d file(s) to review", len(files))
 
 	// Create mock reviewer for now
-	mockReviewer := reviewer.NewMockReviewer("scanr-mock")
+	// mockReviewer := reviewer.NewMockReviewer("scanr-mock")
+	rev, err := createReviewer()
+	if err != nil {
+		return 2, fmt.Errorf("failed to create reviewer: %v", err)
+	}
+
+	log.Printf("Using reviewer: %s", rev.Name())
 
 	// Create review pipeline
-	pipeline, err := review.NewPipeline(review.DefaultConfig(), mockReviewer)
+	pipeline, err := review.NewPipeline(review.DefaultConfig(), rev)
 	if err != nil {
 		return 2, fmt.Errorf("failed to create review pipeline: %v", err)
 	}
@@ -59,6 +65,7 @@ func RunReview(ctx context.Context, cfg *config.Config) (int, error) {
 	for i := range files {
 		filePointers[i] = &files[i]
 	}
+
 	result, err := pipeline.Run(ctx, filePointers)
 	if err != nil {
 		return 2, fmt.Errorf("review failed: %v", err)
@@ -76,10 +83,43 @@ func RunReview(ctx context.Context, cfg *config.Config) (int, error) {
 		return 2, fmt.Errorf("failed to format output: %w", err)
 	}
 
+	// Log AI usage stats if available
+	if aiRev, ok := rev.(reviewer.AIReviewer); ok {
+		usage := aiRev.GetUsage()
+		log.Printf("AI Usage: %d requests, %d tokens, %v duration",
+			usage.TotalRequests, usage.TotalTokens, usage.TotalDuration)
+	}
+
 	// Determine exit code
 	exitCode := output.DetermineExitCode(result)
 
 	return exitCode, nil
+}
+
+func createReviewer() (review.Reviewer, error) {
+	aiConfig, err := config.LoadAIConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AI config: %v", err)
+	}
+
+	// Check if API key is available
+	if aiConfig.APIKey == "" {
+		return nil, fmt.Errorf("AI API key is required. Set SCANR_AI_API_KEY environment variable or create ~/.scanr-ai.yaml configuration file")
+	}
+
+	// Create AI reviewer
+	aiRev, err := reviewer.NewAIReviewer(aiConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create AI reviewer: %v", err)
+	}
+
+	// Validate configuration
+	if err := aiRev.(reviewer.AIReviewer).ValidateConfig(); err != nil {
+		return nil, fmt.Errorf("AI configuration invalid: %v", err)
+	}
+
+	log.Println("Using AI-powered code review")
+	return aiRev, nil
 }
 
 // getFilesToReview gets files to review based on git status or full scan
@@ -123,11 +163,10 @@ func getFilesToReview(ctx context.Context, cwd string, languages []string, cfg *
 func scanAllFiles(ctx context.Context, cwd string, languages []string, maxFiles int) ([]fs.FileInfo, error) {
 	log.Println("Scanning all files (not a git repository)")
 
-	// Create filesystem scanner
 	scanner, err := fs.NewScanner(fs.Config{
 		RootDir:     cwd,
 		Languages:   languages,
-		MaxFileSize: 1024 * 1024, // 1MB
+		MaxFileSize: 1024 * 1024,
 		MaxLines:    1000,
 		IgnoreDirs:  []string{},
 	})
@@ -135,13 +174,11 @@ func scanAllFiles(ctx context.Context, cwd string, languages []string, maxFiles 
 		return nil, fmt.Errorf("failed to create scanner: %v", err)
 	}
 
-	// Scan for files
 	return scanner.Scan(ctx, maxFiles)
 }
 
 // filterAndConvertChanges filters git changes by language and converts to FileInfo
 func filterAndConvertChanges(repo *git.Repository, changes []git.FileChange, languages []string, maxFiles int) ([]fs.FileInfo, error) {
-	// Build language extensions map for filtering
 	langExts := make(map[string]bool)
 	for _, lang := range languages {
 		exts, ok := fs.SupportedExtensions[lang]
@@ -157,7 +194,6 @@ func filterAndConvertChanges(repo *git.Repository, changes []git.FileChange, lan
 	fileCount := 0
 
 	for _, change := range changes {
-		// Skip deleted files
 		if change.ChangeType == git.ChangeDeleted {
 			continue
 		}
@@ -172,12 +208,11 @@ func filterAndConvertChanges(repo *git.Repository, changes []git.FileChange, lan
 		fullPath := filepath.Join(repo.Path, change.Path)
 		info, err := os.Stat(fullPath)
 		if err != nil {
-			// File might not exist (e.g., for staged deletions)
 			continue
 		}
 
 		// Check size limit
-		if info.Size() > 1024*1024 { // 1MB
+		if info.Size() > 1024*1024 {
 			continue
 		}
 
