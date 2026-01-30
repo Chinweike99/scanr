@@ -41,6 +41,7 @@ type WorkerPool struct {
 	taskQueue     chan Task
 	stopChan      chan struct{}
 	stopped       atomic.Bool
+	queueClosed   atomic.Bool
 	wg            sync.WaitGroup
 	mu            sync.RWMutex
 	activeWorkers atomic.Int32
@@ -138,6 +139,19 @@ func (p *WorkerPool) Stats() map[string]int64 {
 	}
 }
 
+// CloseQueue closes the task queue without stopping workers
+// Workers will finish processing queued tasks but won't accept new ones
+func (p *WorkerPool) CloseQueue() error {
+	if p.stopped.Load() {
+		return ErrPoolStopped
+	}
+	if p.queueClosed.Swap(true) {
+		return nil // Already closed
+	}
+	close(p.taskQueue)
+	return nil
+}
+
 // Stop stops the worker pool gracefully
 func (p *WorkerPool) Stop() error {
 	if p.stopped.Swap(true) {
@@ -145,7 +159,11 @@ func (p *WorkerPool) Stop() error {
 	}
 
 	close(p.stopChan)
-	close(p.taskQueue) // Signal workers to stop by closing the queue
+	
+	// Close the task queue only if not already closed
+	if !p.queueClosed.Swap(true) {
+		close(p.taskQueue) // Signal workers to stop by closing the queue
+	}
 
 	// Wait for all workers to finish
 	done := make(chan struct{})
@@ -185,6 +203,8 @@ func (p *WorkerPool) worker(ctx context.Context, workerFunc WorkerFunc, id int) 
 				return // Queue was closed
 			}
 			p.processTask(ctx, task, workerFunc, id)
+		case <-ctx.Done():
+			return // Context cancelled
 		}
 	}
 }

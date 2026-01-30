@@ -120,22 +120,34 @@ func (p *pipeline) Run(ctx context.Context, files []*fs.FileInfo) (*ReviewResult
 	// Submit tasks
 	if err := p.submitTasks(pipelineCtx, files, resultChan); err != nil {
 		cancel()
+		p.workerPool.Stop()
 		return nil, fmt.Errorf("failed to submit tasks: %w", err)
 	}
 
-	// Wait for all tasks to complete before collecting results
-	p.workerPool.Stop()
+	// Close the task queue to signal workers no more tasks coming
+	// But don't wait for workers yet - let them process
+	if err := p.workerPool.CloseQueue(); err != nil {
+		p.workerPool.Stop()
+		return nil, fmt.Errorf("failed to close queue: %w", err)
+	}
 
-	// Close the result channel so collectResults can finish reading
-	close(resultChan)
-	wg.Wait()
+	// Now start a goroutine that waits for all workers to finish,
+	// then closes the result channel
+	go func() {
+		p.workerPool.Stop()
+		close(resultChan)
+	}()
+
+	// Wait for result collection to finish via the done channel
+	<-done
 
 	// Process dead letters (retry logic)
 	// Note: processDeadLetters cannot send on resultChan after it's closed,
 	// so we collect dead letter results separately
-	p.processDeadLetters(pipelineCtx)
+	p.processDeadLetters(pipelineCtx, &result)
 
 	// Finalize result
+	result.StartTime = startTime
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(startTime)
 	result.TotalFiles = len(files)
@@ -229,7 +241,12 @@ func (p *pipeline) processTaskResult(ctx context.Context, taskResult worker.Task
 			p.metrics.filesRetried.Add(1)
 		}
 	} else {
-		issues := taskResult.Issues.([]Issue)
+		var issues []Issue
+		if taskResult.Issues != nil {
+			issues = taskResult.Issues.([]Issue)
+		} else {
+			issues = []Issue{}
+		}
 		fileReview.Issues = issues
 		fileReview.Duration = 0 // Will be populated by reviewer if available
 		result.ReviewedFiles++
@@ -254,10 +271,13 @@ func (p *pipeline) processTaskResult(ctx context.Context, taskResult worker.Task
 }
 
 // processDeadLetters processes tasks in the dead letter queue
-func (p *pipeline) processDeadLetters(ctx context.Context) {
+func (p *pipeline) processDeadLetters(ctx context.Context, result *ReviewResult) {
 	if p.config.MaxRetries <= 0 {
 		return
 	}
+
+	var retryMutex sync.Mutex
+	var retryFileReviews []FileReview
 
 	for i := 0; i < p.config.MaxRetries; i++ {
 		dl, ok := p.deadLetter.Pop()
@@ -271,14 +291,46 @@ func (p *pipeline) processDeadLetters(ctx context.Context) {
 		issues, err := p.reviewer.ReviewFile(retryCtx, dl.Task.File)
 		cancel()
 
-		// Process result directly without sending on closed channel
+		// Process result
 		if err == nil && issues != nil {
-			// Successfully retried - update metrics
+			// Successfully retried - add to results
+			retryMutex.Lock()
+
+			fileReview := FileReview{
+				File:     dl.Task.File,
+				Issues:   issues,
+				Duration: 0,
+			}
+
+			retryFileReviews = append(retryFileReviews, fileReview)
+			result.ReviewedFiles++
+
+			// Count issues by severity
+			for _, issue := range issues {
+				result.TotalIssues++
+				p.metrics.totalIssues.Add(1)
+
+				switch issue.Severity {
+				case SeverityCritical:
+					result.CriticalCount++
+				case SeverityHigh:
+					result.WarningCount++
+				case SeverityInfo:
+					result.InfoCount++
+				}
+			}
+
 			p.metrics.filesRetried.Add(-1) // Remove from retry count
+			retryMutex.Unlock()
 		} else if err != nil {
 			// Still failing, keep in dead letter for next retry cycle
 			p.deadLetter.Push(dl.Task, err, dl.Attempts+1)
 		}
+	}
+
+	// Add retried results to final review results
+	if len(retryFileReviews) > 0 {
+		result.FileReviews = append(result.FileReviews, retryFileReviews...)
 	}
 }
 

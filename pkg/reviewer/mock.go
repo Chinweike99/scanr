@@ -107,6 +107,16 @@ func (m *MockReviewer) Name() string {
 	return m.name
 }
 
+// ValidateConfig validates the mock configuration (always passes)
+func (m *MockReviewer) ValidateConfig() error {
+	return nil
+}
+
+// GetUsage returns usage statistics (always empty for mock)
+func (m *MockReviewer) GetUsage() UsageStats {
+	return UsageStats{}
+}
+
 // generateMockIssue generates a mock issue
 func (m *MockReviewer) generateMockIssue(file *fs.FileInfo) review.Issue {
 	// Common issue patterns
