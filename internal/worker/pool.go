@@ -159,7 +159,7 @@ func (p *WorkerPool) Stop() error {
 	}
 
 	close(p.stopChan)
-	
+
 	// Close the task queue only if not already closed
 	if !p.queueClosed.Swap(true) {
 		close(p.taskQueue) // Signal workers to stop by closing the queue
@@ -176,7 +176,7 @@ func (p *WorkerPool) Stop() error {
 	select {
 	case <-done:
 		return nil
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		return errors.New("timeout waiting for worker pool to stop")
 	}
 }
