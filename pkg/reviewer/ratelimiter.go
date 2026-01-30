@@ -6,16 +6,14 @@ import (
 	"time"
 )
 
-
 type RateLimiter struct {
-    requestsPerMinute int
-    burst             int
-    tokens            int
-    lastRefill        time.Time
-    mu                sync.Mutex
-    waitTime          time.Duration
+	requestsPerMinute int
+	burst             int
+	tokens            int
+	lastRefill        time.Time
+	mu                sync.Mutex
+	waitTime          time.Duration
 }
-
 
 func NewRateLimiter(requestsPerMinute, burst int, waitTime time.Duration) *RateLimiter {
 	if burst <= 0 {
@@ -24,16 +22,14 @@ func NewRateLimiter(requestsPerMinute, burst int, waitTime time.Duration) *RateL
 			burst = 1
 		}
 	}
-	return  &RateLimiter{
+	return &RateLimiter{
 		requestsPerMinute: requestsPerMinute,
-		burst: burst,
-		tokens:  burst,
-		lastRefill: time.Now(),
-		waitTime: waitTime,
+		burst:             burst,
+		tokens:            burst,
+		lastRefill:        time.Now(),
+		waitTime:          waitTime,
 	}
 }
-
-
 
 // Wait blocks until a token is availabele or context is cancelled
 func (r *RateLimiter) Wait(ctx context.Context) error {
@@ -53,16 +49,15 @@ func (r *RateLimiter) Wait(ctx context.Context) error {
 	r.mu.Unlock()
 	select {
 	case <-ctx.Done():
-		return  ctx.Err()
+		return ctx.Err()
 	case <-time.After(waitDuration):
 		return nil
 	}
 
 }
 
-
 // refillTokens refills tokens based on elapsed time
-func (r *RateLimiter) refillTokens(){
+func (r *RateLimiter) refillTokens() {
 	now := time.Now()
 	elapsed := now.Sub(r.lastRefill)
 
@@ -91,9 +86,8 @@ func (r *RateLimiter) Try() bool {
 	return false
 }
 
-
 // SetRate changes the rate limit dynamically
-func (r *RateLimiter) SetRate(requestsPerMinute, burst int){
+func (r *RateLimiter) SetRate(requestsPerMinute, burst int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -105,19 +99,18 @@ func (r *RateLimiter) SetRate(requestsPerMinute, burst int){
 	r.refillTokens()
 }
 
-
 // Stats returns current rate limiter statistics
-func (r *RateLimiter) Stats() map[string]interface{}{
+func (r *RateLimiter) Stats() map[string]interface{} {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	r.refillTokens()
 
 	return map[string]interface{}{
-        "requests_per_minute": r.requestsPerMinute,
-        "burst":               r.burst,
-        "available_tokens":    r.tokens,
-        "last_refill":         r.lastRefill,
-        "max_wait_time":       r.waitTime,
-    }
+		"requests_per_minute": r.requestsPerMinute,
+		"burst":               r.burst,
+		"available_tokens":    r.tokens,
+		"last_refill":         r.lastRefill,
+		"max_wait_time":       r.waitTime,
+	}
 }

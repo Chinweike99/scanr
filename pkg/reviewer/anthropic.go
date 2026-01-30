@@ -314,13 +314,13 @@ func (a *AnthropicReviewer) parseAPIResponse(response []byte, file *internalfs.F
 func (a *AnthropicReviewer) cleanResponseText(text string) string {
 	// Remove markdown code blocks
 	text = strings.TrimSpace(text)
-	if after, ok :=strings.CutPrefix(text, "```json"); ok  {
+	if after, ok := strings.CutPrefix(text, "```json"); ok {
 		text = after
 	}
-	if after, ok :=strings.CutPrefix(text, "```"); ok  {
+	if after, ok := strings.CutPrefix(text, "```"); ok {
 		text = after
 	}
-	if before, ok :=strings.CutSuffix(text, "```"); ok  {
+	if before, ok := strings.CutSuffix(text, "```"); ok {
 		text = before
 	}
 

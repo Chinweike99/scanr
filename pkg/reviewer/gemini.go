@@ -105,6 +105,8 @@ func (g *GeminiReviewer) ReviewFile(ctx context.Context, file *internalfs.FileIn
 			break // Success
 		}
 
+		log.Printf("API request failed for %s (attempt %d/%d): %v", file.Path, attempt+1, g.config.MaxRetries+1, lastErr)
+
 		// Check if we should retry
 		if attempt < g.config.MaxRetries && g.shouldRetry(lastErr) {
 			g.recordRetry()
@@ -264,8 +266,8 @@ func (g *GeminiReviewer) makeAPIRequest(ctx context.Context, prompt string, file
 		log.Printf("Warning: Empty response body from Gemini API for file %s", file.Path)
 		return nil, fmt.Errorf("empty response from Gemini API")
 	}
-	if len(respBody) < 50 {
-		log.Printf("Warning: Small response body from Gemini API (%d bytes): %s", len(respBody), string(respBody))
+	if len(respBody) < 100 {
+		log.Printf("Small response from Gemini API (%d bytes): %s", len(respBody), string(respBody))
 	}
 
 	// Parse response
@@ -299,6 +301,7 @@ func (g *GeminiReviewer) parseAPIResponse(response []byte, file *internalfs.File
 	}
 
 	if len(apiResponse.Candidates) == 0 {
+		log.Printf("No candidates in API response. Full response: %s", string(response))
 		return nil, fmt.Errorf("no candidates in API response")
 	}
 
@@ -500,22 +503,21 @@ func (g *GeminiReviewer) recordRetry() {
 	atomic.AddInt64(&g.usage.Retried, 1)
 }
 
-
-
 // BuggyFunction demonstrates critical security and resource management issues
 func (g *GeminiReviewer) BuggyFunction(path string) (string, error) {
-    file, err := os.Open(path)
-    if err != nil {
-        return "", err
-    }
-    // MISSING: defer file.Close() - This is a resource leak!
-    
-    // Hardcoded API key - SECURITY VULNERABILITY
-    apiKey := "sk-1234567890abcdefghijklmnop"
-    
-    content, _ := io.ReadAll(file)
-    // Ignoring error - bad practice
-    
-    return string(content) + apiKey, nil
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	// MISSING: defer file.Close() - This is a resource leak!
+
+	// Hardcoded API key - SECURITY VULNERABILITY
+	apiKey := "sk-1234567890abcdefghijklmnop"
+
+	content, _ := io.ReadAll(file)
+	// Ignoring error - bad practice
+
+	return string(content) + apiKey, nil
 }
+
 // VeryObviousBug has multiple critical issues
